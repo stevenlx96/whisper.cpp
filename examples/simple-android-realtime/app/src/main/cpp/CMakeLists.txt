@@ -2,8 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 
 project(whisper_android C CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden -fPIC -O3")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden -fPIC -O3")
 
@@ -53,6 +54,10 @@ add_library(whisper SHARED
 # Compiler definitions
 target_compile_definitions(whisper PRIVATE
     GGML_USE_CPU
+    GGML_VERSION="1.0.0"
+    GGML_COMMIT="standalone"
+    WHISPER_VERSION="1.0.0"
+    WHISPER_COMMIT="standalone"
 )
 
 # Enable ARM NEON on ARM platforms
