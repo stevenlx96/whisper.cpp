@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Whisper Realtime</string>
+    <string name="start_recording">开始录音</string>
+    <string name="stop_recording">停止录音</string>
+    <string name="transcription_result">识别结果:</string>
+    <string name="status_ready">准备就绪</string>
+    <string name="status_recording">正在录音...</string>
+    <string name="status_transcribing">正在识别...</string>
+</resources>
