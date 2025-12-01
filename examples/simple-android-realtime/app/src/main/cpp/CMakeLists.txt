@@ -35,6 +35,13 @@ set(GGML_SOURCES
 file(GLOB GGML_CPU_SOURCES ${GGML_DIR}/src/ggml-cpu/*.c ${GGML_DIR}/src/ggml-cpu/*.cpp)
 list(APPEND GGML_SOURCES ${GGML_CPU_SOURCES})
 
+# GGML CPU architecture-specific implementations
+file(GLOB_RECURSE GGML_CPU_ARCH_SOURCES
+    ${GGML_DIR}/src/ggml-cpu/arch/*.c
+    ${GGML_DIR}/src/ggml-cpu/arch/*.cpp
+)
+list(APPEND GGML_SOURCES ${GGML_CPU_ARCH_SOURCES})
+
 # Whisper source files
 set(WHISPER_SOURCES
     ${WHISPER_DIR}/src/whisper.cpp
