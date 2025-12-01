@@ -36,11 +36,24 @@ file(GLOB GGML_CPU_SOURCES ${GGML_DIR}/src/ggml-cpu/*.c ${GGML_DIR}/src/ggml-cpu
 list(APPEND GGML_SOURCES ${GGML_CPU_SOURCES})
 
 # GGML CPU architecture-specific implementations
-file(GLOB_RECURSE GGML_CPU_ARCH_SOURCES
-    ${GGML_DIR}/src/ggml-cpu/arch/*.c
-    ${GGML_DIR}/src/ggml-cpu/arch/*.cpp
-)
-list(APPEND GGML_SOURCES ${GGML_CPU_ARCH_SOURCES})
+# Only include architecture-specific code for the target platform
+if(ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "armeabi-v7a")
+    # ARM architecture
+    file(GLOB GGML_CPU_ARCH_SOURCES
+        ${GGML_DIR}/src/ggml-cpu/arch/arm/*.c
+        ${GGML_DIR}/src/ggml-cpu/arch/arm/*.cpp
+    )
+elseif(ANDROID_ABI STREQUAL "x86" OR ANDROID_ABI STREQUAL "x86_64")
+    # x86 architecture
+    file(GLOB GGML_CPU_ARCH_SOURCES
+        ${GGML_DIR}/src/ggml-cpu/arch/x86/*.c
+        ${GGML_DIR}/src/ggml-cpu/arch/x86/*.cpp
+    )
+endif()
+
+if(GGML_CPU_ARCH_SOURCES)
+    list(APPEND GGML_SOURCES ${GGML_CPU_ARCH_SOURCES})
+endif()
 
 # Whisper source files
 set(WHISPER_SOURCES
