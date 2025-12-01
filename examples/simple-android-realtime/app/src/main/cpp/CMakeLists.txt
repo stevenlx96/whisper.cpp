@@ -17,6 +17,7 @@ include_directories(
     ${WHISPER_DIR}/include
     ${GGML_DIR}/include
     ${GGML_DIR}/src
+    ${GGML_DIR}/src/ggml-cpu
 )
 
 # GGML source files
