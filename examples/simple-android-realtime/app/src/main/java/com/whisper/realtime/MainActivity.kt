@@ -3,8 +3,6 @@ package com.whisper.realtime
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
@@ -13,12 +11,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_RECORD_AUDIO = 1
-        private const val MODEL_PATH = "models/ggml-tiny.bin"
     }
 
     private lateinit var statusText: TextView
@@ -48,7 +46,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Check and request permission
         if (!checkPermissions()) {
             requestPermissions()
         } else {
@@ -81,7 +78,7 @@ class MainActivity : AppCompatActivity() {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 initializeWhisper()
             } else {
-                Toast.makeText(this, "需要录音权限", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Record audio permission required", Toast.LENGTH_SHORT).show()
                 finish()
             }
         }
@@ -90,22 +87,46 @@ class MainActivity : AppCompatActivity() {
     private fun initializeWhisper() {
         scope.launch(Dispatchers.IO) {
             try {
-                updateStatus("正在加载模型...")
-                whisperContext = WhisperContext.createFromAsset(assets, MODEL_PATH)
+                updateStatus("Loading model...")
+
+                val modelsDir = File(filesDir, "whisper_models")
+                if (!modelsDir.exists()) {
+                    modelsDir.mkdirs()
+                }
+
+                Log.d(TAG, "Models directory: ${modelsDir.absolutePath}")
+
+                val modelFile = modelsDir.listFiles { file ->
+                    file.isFile && file.name.endsWith(".bin")
+                }?.firstOrNull()
+
+                if (modelFile == null) {
+                    withContext(Dispatchers.Main) {
+                        updateStatus("No model found")
+                        Toast.makeText(
+                            this@MainActivity,
+                            "No .bin model file found in:\n${modelsDir.absolutePath}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@launch
+                }
+
+                Log.d(TAG, "Loading model from: ${modelFile.absolutePath}")
+                updateStatus("Loading: ${modelFile.name}")
+
+                whisperContext = WhisperContext.createFromFile(modelFile.absolutePath)
+
                 withContext(Dispatchers.Main) {
-                    updateStatus("准备就绪")
-                    Toast.makeText(this@MainActivity, "Whisper 模型加载成功", Toast.LENGTH_SHORT).show()
+                    updateStatus("Ready to record")
+                    Toast.makeText(this@MainActivity, "Model loaded", Toast.LENGTH_SHORT).show()
                 }
                 Log.d(TAG, "Whisper initialized successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize Whisper", e)
                 withContext(Dispatchers.Main) {
-                    updateStatus("模型加载失败")
-                    Toast.makeText(
-                        this@MainActivity,
-                        "模型加载失败: ${e.message}\n请确保将 ggml-tiny.bin 放入 assets/models/ 目录",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    updateStatus("Load failed")
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -113,7 +134,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRecording() {
         if (whisperContext == null) {
-            Toast.makeText(this, "Whisper 未初始化", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Whisper not initialized", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -121,20 +142,19 @@ class MainActivity : AppCompatActivity() {
             audioRecorder.startRecording()
             isRecording = true
             recordButton.text = getString(R.string.stop_recording)
-            updateStatus("正在录音...")
+            updateStatus("Recording...")
 
-            // Continuously read audio data in background
             recordingJob = scope.launch(Dispatchers.IO) {
                 while (isActive && isRecording) {
                     audioRecorder.readAudioData()
-                    delay(100) // Read every 100ms
+                    delay(25)
                 }
             }
 
             Log.d(TAG, "Recording started")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
-            Toast.makeText(this, "录音失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
             isRecording = false
         }
     }
@@ -143,17 +163,18 @@ class MainActivity : AppCompatActivity() {
         recordingJob?.cancel()
         isRecording = false
         recordButton.text = getString(R.string.start_recording)
-        updateStatus("正在识别...")
+        updateStatus("Transcribing...")
 
         scope.launch(Dispatchers.IO) {
             try {
-                val audioData = audioRecorder.stopRecording()
+                val cacheDir = File(cacheDir, "pcm_recordings")
+                val audioData = audioRecorder.stopRecordingAndSavePCM(cacheDir)
                 Log.d(TAG, "Audio data size: ${audioData.size}")
 
                 if (audioData.isEmpty()) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "没有录音数据", Toast.LENGTH_SHORT).show()
-                        updateStatus("准备就绪")
+                        Toast.makeText(this@MainActivity, "No audio data", Toast.LENGTH_SHORT).show()
+                        updateStatus("Ready to record")
                     }
                     return@launch
                 }
@@ -170,19 +191,15 @@ class MainActivity : AppCompatActivity() {
                             "$currentText\n\n$result"
                         }
                     } else {
-                        Toast.makeText(this@MainActivity, "未识别到内容", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "No text recognized", Toast.LENGTH_SHORT).show()
                     }
-                    updateStatus("准备就绪")
+                    updateStatus("Ready to record")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Transcription failed", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "识别失败: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    updateStatus("准备就绪")
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateStatus("Ready to record")
                 }
             }
         }
