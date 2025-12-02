@@ -235,9 +235,10 @@ class MainActivity : AppCompatActivity() {
 
         scope.launch(Dispatchers.IO) {
             try {
-                // Stop recording and process any remaining audio
-                audioRecorder.stopRecording()
-                Log.d(TAG, "Recording stopped")
+                // Stop recording and save PCM to cache
+                val cacheDir = File(cacheDir, "pcm_recordings")
+                audioRecorder.stopRecordingAndSavePCM(cacheDir)
+                Log.d(TAG, "Recording stopped and saved to cache")
 
                 withContext(Dispatchers.Main) {
                     updateStatus("Ready to record")

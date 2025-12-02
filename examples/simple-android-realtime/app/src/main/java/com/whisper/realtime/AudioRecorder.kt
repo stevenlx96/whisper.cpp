@@ -23,6 +23,7 @@ class AudioRecorder {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
     private val audioBuffer = mutableListOf<Short>()
+    private val allRecordedAudio = mutableListOf<Short>()  // Keep all audio for saving
 
     fun startRecording() {
         if (isRecording) {
@@ -46,6 +47,7 @@ class AudioRecorder {
             )
 
             audioBuffer.clear()
+            allRecordedAudio.clear()
             audioRecord?.startRecording()
             isRecording = true
 
@@ -67,12 +69,13 @@ class AudioRecorder {
         audioRecord?.release()
         audioRecord = null
 
+        // Return any remaining audio in buffer
         val floatArray = FloatArray(audioBuffer.size)
         for (i in audioBuffer.indices) {
             floatArray[i] = audioBuffer[i] / 32768.0f
         }
 
-        Log.d(TAG, "Recording stopped, captured ${floatArray.size} samples")
+        Log.d(TAG, "Recording stopped, captured ${floatArray.size} samples in buffer, ${allRecordedAudio.size} samples total")
         return floatArray
     }
 
@@ -87,27 +90,30 @@ class AudioRecorder {
         audioRecord?.release()
         audioRecord = null
 
+        // Get max amplitude for gain calculation
         val maxAmplitude = getMaxAmplitude()
         Log.d(TAG, "Max amplitude: $maxAmplitude")
 
         val gainFactor = calculateGain(maxAmplitude)
         Log.d(TAG, "Gain factor: $gainFactor")
 
-        val processedBuffer = applyGain(gainFactor)
+        // Apply gain to all recorded audio
+        val processedBuffer = applyGainToList(allRecordedAudio, gainFactor)
         savePCMToFile(cacheDir, processedBuffer)
 
+        // Convert to float array
         val floatArray = FloatArray(processedBuffer.size)
         for (i in processedBuffer.indices) {
             floatArray[i] = processedBuffer[i] / 32768.0f
         }
 
-        Log.d(TAG, "Recording stopped, captured ${floatArray.size} samples")
+        Log.d(TAG, "Recording stopped and saved, captured ${floatArray.size} samples")
         return floatArray
     }
 
     private fun getMaxAmplitude(): Int {
-        if (audioBuffer.isEmpty()) return 0
-        return audioBuffer.maxOfOrNull { abs(it.toInt()) } ?: 0
+        if (allRecordedAudio.isEmpty()) return 0
+        return allRecordedAudio.maxOfOrNull { abs(it.toInt()) } ?: 0
     }
 
     private fun calculateGain(maxAmplitude: Int): Float {
@@ -119,11 +125,11 @@ class AudioRecorder {
         return min(gain, 3.0f)
     }
 
-    private fun applyGain(gainFactor: Float): ShortArray {
-        val result = ShortArray(audioBuffer.size)
+    private fun applyGainToList(audioList: List<Short>, gainFactor: Float): ShortArray {
+        val result = ShortArray(audioList.size)
 
-        for (i in audioBuffer.indices) {
-            val amplified = (audioBuffer[i].toInt() * gainFactor).toInt()
+        for (i in audioList.indices) {
+            val amplified = (audioList[i].toInt() * gainFactor).toInt()
             result[i] = max(Short.MIN_VALUE.toInt(), min(Short.MAX_VALUE.toInt(), amplified)).toShort()
         }
 
@@ -178,6 +184,7 @@ class AudioRecorder {
             synchronized(audioBuffer) {
                 for (i in 0 until readCount) {
                     audioBuffer.add(buffer[i])
+                    allRecordedAudio.add(buffer[i])  // Also save to complete recording
                 }
             }
         }
