@@ -17,6 +17,12 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_RECORD_AUDIO = 1
+
+        // Streaming parameters (following stream.cpp design)
+        private const val SAMPLE_RATE = 16000
+        private const val STEP_MS = 1000        // Process every 1 second
+        private const val LENGTH_MS = 5000      // Use 5 seconds of audio
+        private const val KEEP_MS = 1000        // Keep 1 second overlap
     }
 
     private lateinit var statusText: TextView
@@ -29,6 +35,11 @@ class MainActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var recordingJob: Job? = null
+
+    // Sliding window state
+    private var previousAudio = FloatArray(0)
+    private val stepSamples = (STEP_MS * SAMPLE_RATE) / 1000
+    private val keepSamples = (KEEP_MS * SAMPLE_RATE) / 1000
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -144,52 +155,71 @@ class MainActivity : AppCompatActivity() {
             recordButton.text = getString(R.string.stop_recording)
             updateStatus("Recording...")
 
-            // Continuously read and transcribe audio data in background
+            // Reset sliding window state
+            previousAudio = FloatArray(0)
+
+            Log.d(TAG, "Starting streaming recognition: step=${STEP_MS}ms, length=${LENGTH_MS}ms, keep=${KEEP_MS}ms")
+
+            // Sliding window streaming transcription
             recordingJob = scope.launch(Dispatchers.IO) {
-                var lastTranscribeTime = System.currentTimeMillis()
-                val transcribeInterval = 3000L // Transcribe every 3 seconds
+                var iterationCount = 0
 
                 while (isActive && isRecording) {
+                    // Continuously read audio data
                     audioRecorder.readAudioData()
 
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastTranscribeTime >= transcribeInterval) {
-                        // Get current audio chunk and transcribe
-                        val audioChunk = audioRecorder.getAudioChunk()
+                    // Get audio with overlap using sliding window
+                    val audioData = audioRecorder.getAudioWithOverlap(
+                        stepSamples = stepSamples,
+                        keepSamples = keepSamples,
+                        previousAudio = previousAudio
+                    )
 
-                        if (audioChunk.isNotEmpty()) {
-                            withContext(Dispatchers.Main) {
-                                updateStatus("Transcribing...")
-                            }
+                    if (audioData.isNotEmpty()) {
+                        iterationCount++
+                        Log.d(TAG, "Processing iteration $iterationCount with ${audioData.size} samples")
 
-                            try {
-                                val result = whisperContext?.transcribe(audioChunk, numThreads = 4) ?: ""
-                                Log.d(TAG, "Chunk transcription result: $result")
-
-                                if (result.isNotEmpty()) {
-                                    withContext(Dispatchers.Main) {
-                                        val currentText = transcriptionText.text.toString()
-                                        transcriptionText.text = if (currentText.isEmpty()) {
-                                            result
-                                        } else {
-                                            "$currentText $result"
-                                        }
-                                        updateStatus("Recording...")
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Chunk transcription failed", e)
-                            }
+                        withContext(Dispatchers.Main) {
+                            updateStatus("Transcribing...")
                         }
 
-                        lastTranscribeTime = currentTime
+                        try {
+                            // Use streaming transcription with context
+                            val result = whisperContext?.transcribeStreaming(
+                                audioData,
+                                numThreads = 4,
+                                keepContext = true
+                            ) ?: ""
+
+                            Log.d(TAG, "Streaming result: '$result'")
+
+                            if (result.isNotEmpty()) {
+                                withContext(Dispatchers.Main) {
+                                    val currentText = transcriptionText.text.toString()
+                                    transcriptionText.text = if (currentText.isEmpty()) {
+                                        result
+                                    } else {
+                                        "$currentText $result"
+                                    }
+                                    updateStatus("Recording...")
+                                }
+                            }
+
+                            // Update previous audio for next iteration
+                            previousAudio = audioData
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Streaming transcription failed", e)
+                            withContext(Dispatchers.Main) {
+                                updateStatus("Recording...")
+                            }
+                        }
                     }
 
-                    delay(25) // Read every 25ms
+                    delay(25) // Read audio every 25ms
                 }
             }
 
-            Log.d(TAG, "Recording started with streaming transcription")
+            Log.d(TAG, "Recording started with sliding window streaming")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
             Toast.makeText(this, "Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -201,37 +231,19 @@ class MainActivity : AppCompatActivity() {
         recordingJob?.cancel()
         isRecording = false
         recordButton.text = getString(R.string.start_recording)
-        updateStatus("Processing final audio...")
+        updateStatus("Stopping...")
 
         scope.launch(Dispatchers.IO) {
             try {
-                // Get any remaining audio data with gain processing
-                val cacheDir = File(cacheDir, "pcm_recordings")
-                val audioData = audioRecorder.stopRecordingAndSavePCM(cacheDir)
-                Log.d(TAG, "Final audio data size: ${audioData.size}")
+                // Stop recording and process any remaining audio
+                audioRecorder.stopRecording()
+                Log.d(TAG, "Recording stopped")
 
-                if (audioData.isNotEmpty()) {
-                    val result = whisperContext?.transcribe(audioData, numThreads = 4) ?: ""
-                    Log.d(TAG, "Final transcription result: $result")
-
-                    withContext(Dispatchers.Main) {
-                        if (result.isNotEmpty()) {
-                            val currentText = transcriptionText.text.toString()
-                            transcriptionText.text = if (currentText.isEmpty()) {
-                                result
-                            } else {
-                                "$currentText $result"
-                            }
-                        }
-                        updateStatus("Ready to record")
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        updateStatus("Ready to record")
-                    }
+                withContext(Dispatchers.Main) {
+                    updateStatus("Ready to record")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Final transcription failed", e)
+                Log.e(TAG, "Error stopping recording", e)
                 withContext(Dispatchers.Main) {
                     updateStatus("Ready to record")
                 }

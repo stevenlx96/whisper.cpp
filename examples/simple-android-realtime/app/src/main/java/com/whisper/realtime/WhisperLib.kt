@@ -31,6 +31,9 @@ class WhisperLib {
         external fun fullTranscribe(contextPtr: Long, numThreads: Int, audioData: FloatArray): Int
 
         @JvmStatic
+        external fun fullTranscribeWithContext(contextPtr: Long, numThreads: Int, audioData: FloatArray, keepContext: Boolean): Int
+
+        @JvmStatic
         external fun getTextSegmentCount(contextPtr: Long): Int
 
         @JvmStatic
@@ -48,6 +51,24 @@ class WhisperContext(private var ptr: Long) {
         }
 
         WhisperLib.fullTranscribe(ptr, numThreads, audioData)
+        val segmentCount = WhisperLib.getTextSegmentCount(ptr)
+
+        return buildString {
+            for (i in 0 until segmentCount) {
+                append(WhisperLib.getTextSegment(ptr, i))
+                if (i < segmentCount - 1) {
+                    append(" ")
+                }
+            }
+        }
+    }
+
+    fun transcribeStreaming(audioData: FloatArray, numThreads: Int = 4, keepContext: Boolean = true): String {
+        if (ptr == 0L) {
+            throw RuntimeException("Context is not initialized")
+        }
+
+        WhisperLib.fullTranscribeWithContext(ptr, numThreads, audioData, keepContext)
         val segmentCount = WhisperLib.getTextSegmentCount(ptr)
 
         return buildString {

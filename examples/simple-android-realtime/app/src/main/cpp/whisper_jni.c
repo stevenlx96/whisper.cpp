@@ -139,6 +139,49 @@ Java_com_whisper_realtime_WhisperLib_fullTranscribe(
     return 0;
 }
 
+// Transcribe audio data with context preservation (for streaming)
+JNIEXPORT jint JNICALL
+Java_com_whisper_realtime_WhisperLib_fullTranscribeWithContext(
+        JNIEnv *env, jclass clazz, jlong ctx_ptr, jint num_threads, jfloatArray audio_data, jboolean keep_context) {
+
+    struct whisper_context *ctx = (struct whisper_context *) ctx_ptr;
+    if (!ctx) {
+        LOGE("Invalid context");
+        return -1;
+    }
+
+    jfloat *audio_arr = (*env)->GetFloatArrayElements(env, audio_data, NULL);
+    jsize audio_len = (*env)->GetArrayLength(env, audio_data);
+
+    LOGI("Transcribing %d audio samples with %d threads (keep_context=%d)", audio_len, num_threads, keep_context);
+
+    // Set up parameters
+    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    params.print_realtime = false;
+    params.print_progress = false;
+    params.print_timestamps = false;
+    params.print_special = false;
+    params.translate = false;
+    params.language = "auto";
+    params.n_threads = num_threads;
+    params.offset_ms = 0;
+    params.no_context = !keep_context;  // Keep context for streaming
+    params.single_segment = true;  // Single segment mode for streaming
+
+    // Run transcription
+    int result = whisper_full(ctx, params, audio_arr, audio_len);
+
+    (*env)->ReleaseFloatArrayElements(env, audio_data, audio_arr, JNI_ABORT);
+
+    if (result != 0) {
+        LOGE("Failed to run whisper_full");
+        return -1;
+    }
+
+    LOGI("Transcription completed successfully");
+    return 0;
+}
+
 // Get number of text segments
 JNIEXPORT jint JNICALL
 Java_com_whisper_realtime_WhisperLib_getTextSegmentCount(

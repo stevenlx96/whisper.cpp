@@ -204,4 +204,49 @@ class AudioRecorder {
             return floatArray
         }
     }
+
+    /**
+     * Get audio data for sliding window processing
+     * @param stepSamples: number of new samples to collect
+     * @param keepSamples: number of samples to keep from previous data
+     * @return audio data with overlap
+     */
+    fun getAudioWithOverlap(stepSamples: Int, keepSamples: Int, previousAudio: FloatArray): FloatArray {
+        if (!isRecording) {
+            return FloatArray(0)
+        }
+
+        synchronized(audioBuffer) {
+            val currentSize = audioBuffer.size
+
+            // If we don't have enough new samples yet, return empty
+            if (currentSize < stepSamples) {
+                return FloatArray(0)
+            }
+
+            // Calculate how many samples to take from previous audio
+            val samplesToKeep = minOf(keepSamples, previousAudio.size)
+
+            // Create result array: kept samples + new samples
+            val result = FloatArray(samplesToKeep + currentSize)
+
+            // Copy kept samples from previous audio (last N samples)
+            if (samplesToKeep > 0) {
+                for (i in 0 until samplesToKeep) {
+                    result[i] = previousAudio[previousAudio.size - samplesToKeep + i]
+                }
+            }
+
+            // Copy current buffer (all new samples)
+            for (i in 0 until currentSize) {
+                result[samplesToKeep + i] = audioBuffer[i] / 32768.0f
+            }
+
+            // Clear the buffer for next iteration
+            audioBuffer.clear()
+
+            Log.d(TAG, "Retrieved audio with overlap: kept=$samplesToKeep, new=$currentSize, total=${result.size}")
+            return result
+        }
+    }
 }
