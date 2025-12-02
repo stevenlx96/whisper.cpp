@@ -165,8 +165,8 @@ Java_com_whisper_realtime_WhisperLib_fullTranscribeWithContext(
     params.language = "auto";
     params.n_threads = num_threads;
     params.offset_ms = 0;
-    params.no_context = !keep_context;  // Keep context for streaming
-    params.single_segment = true;  // Single segment mode for streaming
+    params.no_context = true;  // Don't keep context (like stream.cpp default)
+    params.single_segment = false;  // Allow multiple segments for faster output
 
     // Run transcription
     int result = whisper_full(ctx, params, audio_arr, audio_len);

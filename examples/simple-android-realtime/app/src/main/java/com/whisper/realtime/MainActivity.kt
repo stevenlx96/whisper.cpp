@@ -20,9 +20,9 @@ class MainActivity : AppCompatActivity() {
 
         // Streaming parameters (following stream.cpp design)
         private const val SAMPLE_RATE = 16000
-        private const val STEP_MS = 1000        // Process every 1 second
-        private const val LENGTH_MS = 5000      // Use 5 seconds of audio
-        private const val KEEP_MS = 1000        // Keep 1 second overlap
+        private const val STEP_MS = 2000        // Process every 2 seconds (faster response)
+        private const val LENGTH_MS = 10000     // Use 10 seconds of audio (more context for accuracy)
+        private const val KEEP_MS = 500         // Keep 0.5 second overlap
     }
 
     private lateinit var statusText: TextView
