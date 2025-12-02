@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var recordingJob: Job? = null
+    private var processingJob: Job? = null
 
     // Sliding window state
     private var previousAudio = FloatArray(0)
@@ -160,14 +161,19 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(TAG, "Starting streaming recognition: step=${STEP_MS}ms, length=${LENGTH_MS}ms, keep=${KEEP_MS}ms")
 
-            // Sliding window streaming transcription
+            // Audio reading coroutine - runs continuously without blocking
             recordingJob = scope.launch(Dispatchers.IO) {
+                while (isActive && isRecording) {
+                    audioRecorder.readAudioData()
+                    delay(10) // Read audio every 10ms to avoid missing data
+                }
+            }
+
+            // Audio processing coroutine - handles transcription separately
+            processingJob = scope.launch(Dispatchers.IO) {
                 var iterationCount = 0
 
                 while (isActive && isRecording) {
-                    // Continuously read audio data
-                    audioRecorder.readAudioData()
-
                     // Get audio with overlap using sliding window
                     val audioData = audioRecorder.getAudioWithOverlap(
                         stepSamples = stepSamples,
@@ -215,7 +221,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    delay(25) // Read audio every 25ms
+                    delay(100) // Check for new audio every 100ms
                 }
             }
 
@@ -228,7 +234,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopRecordingAndTranscribe() {
+        // Cancel both coroutines
         recordingJob?.cancel()
+        processingJob?.cancel()
         isRecording = false
         recordButton.text = getString(R.string.start_recording)
         updateStatus("Stopping...")
