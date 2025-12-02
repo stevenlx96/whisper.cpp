@@ -175,11 +175,33 @@ class AudioRecorder {
         val readCount = audioRecord?.read(buffer, 0, buffer.size) ?: 0
 
         if (readCount > 0) {
-            for (i in 0 until readCount) {
-                audioBuffer.add(buffer[i])
+            synchronized(audioBuffer) {
+                for (i in 0 until readCount) {
+                    audioBuffer.add(buffer[i])
+                }
             }
         }
     }
 
     fun isRecording(): Boolean = isRecording
+
+    /**
+     * Get current audio chunk without stopping recording
+     * Returns normalized audio data and clears the buffer
+     */
+    fun getAudioChunk(): FloatArray {
+        if (!isRecording || audioBuffer.isEmpty()) {
+            return FloatArray(0)
+        }
+
+        synchronized(audioBuffer) {
+            val floatArray = FloatArray(audioBuffer.size)
+            for (i in audioBuffer.indices) {
+                floatArray[i] = audioBuffer[i] / 32768.0f
+            }
+            audioBuffer.clear()
+            Log.d(TAG, "Retrieved audio chunk with ${floatArray.size} samples")
+            return floatArray
+        }
+    }
 }

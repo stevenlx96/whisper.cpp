@@ -144,14 +144,52 @@ class MainActivity : AppCompatActivity() {
             recordButton.text = getString(R.string.stop_recording)
             updateStatus("Recording...")
 
+            // Continuously read and transcribe audio data in background
             recordingJob = scope.launch(Dispatchers.IO) {
+                var lastTranscribeTime = System.currentTimeMillis()
+                val transcribeInterval = 3000L // Transcribe every 3 seconds
+
                 while (isActive && isRecording) {
                     audioRecorder.readAudioData()
-                    delay(25)
+
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastTranscribeTime >= transcribeInterval) {
+                        // Get current audio chunk and transcribe
+                        val audioChunk = audioRecorder.getAudioChunk()
+
+                        if (audioChunk.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                updateStatus("Transcribing...")
+                            }
+
+                            try {
+                                val result = whisperContext?.transcribe(audioChunk, numThreads = 4) ?: ""
+                                Log.d(TAG, "Chunk transcription result: $result")
+
+                                if (result.isNotEmpty()) {
+                                    withContext(Dispatchers.Main) {
+                                        val currentText = transcriptionText.text.toString()
+                                        transcriptionText.text = if (currentText.isEmpty()) {
+                                            result
+                                        } else {
+                                            "$currentText $result"
+                                        }
+                                        updateStatus("Recording...")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Chunk transcription failed", e)
+                            }
+                        }
+
+                        lastTranscribeTime = currentTime
+                    }
+
+                    delay(25) // Read every 25ms
                 }
             }
 
-            Log.d(TAG, "Recording started")
+            Log.d(TAG, "Recording started with streaming transcription")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
             Toast.makeText(this, "Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -163,42 +201,38 @@ class MainActivity : AppCompatActivity() {
         recordingJob?.cancel()
         isRecording = false
         recordButton.text = getString(R.string.start_recording)
-        updateStatus("Transcribing...")
+        updateStatus("Processing final audio...")
 
         scope.launch(Dispatchers.IO) {
             try {
+                // Get any remaining audio data with gain processing
                 val cacheDir = File(cacheDir, "pcm_recordings")
                 val audioData = audioRecorder.stopRecordingAndSavePCM(cacheDir)
-                Log.d(TAG, "Audio data size: ${audioData.size}")
+                Log.d(TAG, "Final audio data size: ${audioData.size}")
 
-                if (audioData.isEmpty()) {
+                if (audioData.isNotEmpty()) {
+                    val result = whisperContext?.transcribe(audioData, numThreads = 4) ?: ""
+                    Log.d(TAG, "Final transcription result: $result")
+
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "No audio data", Toast.LENGTH_SHORT).show()
+                        if (result.isNotEmpty()) {
+                            val currentText = transcriptionText.text.toString()
+                            transcriptionText.text = if (currentText.isEmpty()) {
+                                result
+                            } else {
+                                "$currentText $result"
+                            }
+                        }
                         updateStatus("Ready to record")
                     }
-                    return@launch
-                }
-
-                val result = whisperContext?.transcribe(audioData, numThreads = 4) ?: ""
-                Log.d(TAG, "Transcription result: $result")
-
-                withContext(Dispatchers.Main) {
-                    if (result.isNotEmpty()) {
-                        val currentText = transcriptionText.text.toString()
-                        transcriptionText.text = if (currentText.isEmpty()) {
-                            result
-                        } else {
-                            "$currentText\n\n$result"
-                        }
-                    } else {
-                        Toast.makeText(this@MainActivity, "No text recognized", Toast.LENGTH_SHORT).show()
+                } else {
+                    withContext(Dispatchers.Main) {
+                        updateStatus("Ready to record")
                     }
-                    updateStatus("Ready to record")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Transcription failed", e)
+                Log.e(TAG, "Final transcription failed", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                     updateStatus("Ready to record")
                 }
             }
