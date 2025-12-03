@@ -20,9 +20,9 @@ class MainActivity : AppCompatActivity() {
 
         // Streaming parameters (following stream.cpp design)
         private const val SAMPLE_RATE = 16000
-        private const val STEP_MS = 2000        // Process every 2 seconds (faster response)
-        private const val LENGTH_MS = 10000     // Use 10 seconds of audio (more context for accuracy)
-        private const val KEEP_MS = 500         // Keep 0.5 second overlap
+        private const val STEP_MS = 1500        // Process every 1.5 seconds (fast response)
+        private const val LENGTH_MS = 10000     // Use 10 seconds of audio window (more context)
+        private const val KEEP_MS = 200         // Keep 0.2 second overlap
     }
 
     private lateinit var statusText: TextView
@@ -38,8 +38,9 @@ class MainActivity : AppCompatActivity() {
     private var processingJob: Job? = null
 
     // Sliding window state
-    private var previousAudio = FloatArray(0)
+    private var allRecordedAudioFloat = mutableListOf<Float>()  // Fixed-size sliding window
     private val stepSamples = (STEP_MS * SAMPLE_RATE) / 1000
+    private val lengthSamples = (LENGTH_MS * SAMPLE_RATE) / 1000
     private val keepSamples = (KEEP_MS * SAMPLE_RATE) / 1000
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -156,10 +157,10 @@ class MainActivity : AppCompatActivity() {
             recordButton.text = getString(R.string.stop_recording)
             updateStatus("Recording...")
 
-            // Reset sliding window state
-            previousAudio = FloatArray(0)
+            // Reset accumulation buffer
+            allRecordedAudioFloat.clear()
 
-            Log.d(TAG, "Starting streaming recognition: step=${STEP_MS}ms, length=${LENGTH_MS}ms, keep=${KEEP_MS}ms")
+            Log.d(TAG, "Starting streaming recognition: step=${STEP_MS}ms")
 
             // Audio reading coroutine - runs continuously without blocking
             recordingJob = scope.launch(Dispatchers.IO) {
@@ -169,63 +170,77 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // Audio processing coroutine - handles transcription separately
+            // Audio processing coroutine - re-transcribes fixed-size sliding window
             processingJob = scope.launch(Dispatchers.IO) {
                 var iterationCount = 0
+                var lastProcessTime = System.currentTimeMillis()
 
                 while (isActive && isRecording) {
-                    // Get audio with overlap using sliding window
-                    val audioData = audioRecorder.getAudioWithOverlap(
-                        stepSamples = stepSamples,
-                        keepSamples = keepSamples,
-                        previousAudio = previousAudio
-                    )
+                    val currentTime = System.currentTimeMillis()
 
-                    if (audioData.isNotEmpty()) {
-                        iterationCount++
-                        Log.d(TAG, "Processing iteration $iterationCount with ${audioData.size} samples")
-
-                        withContext(Dispatchers.Main) {
-                            updateStatus("Transcribing...")
-                        }
-
-                        try {
-                            // Use streaming transcription with context
-                            val result = whisperContext?.transcribeStreaming(
-                                audioData,
-                                numThreads = 4,
-                                keepContext = true
-                            ) ?: ""
-
-                            Log.d(TAG, "Streaming result: '$result'")
-
-                            if (result.isNotEmpty()) {
-                                withContext(Dispatchers.Main) {
-                                    val currentText = transcriptionText.text.toString()
-                                    transcriptionText.text = if (currentText.isEmpty()) {
-                                        result
-                                    } else {
-                                        "$currentText $result"
-                                    }
-                                    updateStatus("Recording...")
-                                }
+                    // Continuously accumulate audio samples
+                    val currentAudio = audioRecorder.getAudioChunk()
+                    if (currentAudio.isNotEmpty()) {
+                        synchronized(allRecordedAudioFloat) {
+                            for (sample in currentAudio) {
+                                allRecordedAudioFloat.add(sample)
                             }
 
-                            // Update previous audio for next iteration
-                            previousAudio = audioData
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Streaming transcription failed", e)
-                            withContext(Dispatchers.Main) {
-                                updateStatus("Recording...")
+                            // Keep only the most recent LENGTH_MS seconds of audio
+                            while (allRecordedAudioFloat.size > lengthSamples) {
+                                allRecordedAudioFloat.removeAt(0)
                             }
                         }
                     }
 
-                    delay(100) // Check for new audio every 100ms
+                    // Process every STEP_MS milliseconds
+                    if (currentTime - lastProcessTime >= STEP_MS) {
+                        // Get current audio window
+                        val audioToProcess = synchronized(allRecordedAudioFloat) {
+                            allRecordedAudioFloat.toFloatArray()
+                        }
+
+                        if (audioToProcess.size >= stepSamples) {  // At least STEP_MS of audio
+                            iterationCount++
+                            val durationSec = audioToProcess.size.toFloat() / SAMPLE_RATE
+                            Log.d(TAG, "Processing iteration $iterationCount: ${audioToProcess.size} samples (%.1fs)".format(durationSec))
+
+                            withContext(Dispatchers.Main) {
+                                updateStatus("Transcribing...")
+                            }
+
+                            try {
+                                // Re-transcribe the entire current window
+                                // Each iteration refines the result with the sliding window context
+                                val result = whisperContext?.transcribeStreaming(
+                                    audioToProcess,
+                                    numThreads = 4,
+                                    keepContext = false
+                                ) ?: ""
+
+                                Log.d(TAG, "Result: '$result'")
+
+                                withContext(Dispatchers.Main) {
+                                    // Replace entire text (allows refinement as more audio arrives)
+                                    transcriptionText.text = result
+                                    updateStatus("Recording...")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Streaming transcription failed", e)
+                                withContext(Dispatchers.Main) {
+                                    updateStatus("Recording...")
+                                }
+                            }
+                        }
+
+                        lastProcessTime = currentTime
+                    }
+
+                    delay(50) // Check frequently for smooth accumulation
                 }
             }
 
-            Log.d(TAG, "Recording started with sliding window streaming")
+            Log.d(TAG, "Recording started with cumulative re-transcription")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
             Toast.makeText(this, "Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
